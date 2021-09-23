@@ -1,12 +1,22 @@
 use iced::{
     button, executor, Align, Application, Button, Clipboard, Column, Command, Element,
-    HorizontalAlignment, Length, Row, Settings, Text,
+    HorizontalAlignment, Length, Row, Settings, Subscription, Text,
 };
+use std::time::{Duration, Instant};
+
+const FPS: u64 = 30;
+const MILLISEC: u64 = 1000;
+const MINUTE: u64 = 60;
+const HOUR: u64 = 60 * MINUTE;
+
+mod timer;
 
 struct GUI {
     tick_state: TickState,
     start_stop_button_state: button::State,
     reset_button_state: button::State,
+    last_update: Instant,
+    total_duration: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -14,6 +24,7 @@ pub enum Message {
     Start,
     Stop,
     Reset,
+    Update,
 }
 
 pub enum TickState {
@@ -32,6 +43,8 @@ impl Application for GUI {
                 tick_state: TickState::Stopped,
                 start_stop_button_state: button::State::new(),
                 reset_button_state: button::State::new(),
+                last_update: Instant::now(),
+                total_duration: Duration::default(),
             },
             Command::none(),
         )
@@ -47,16 +60,40 @@ impl Application for GUI {
         _clipboard: &mut Clipboard,
     ) -> Command<Self::Message> {
         match message {
-            Message::Start => self.tick_state = TickState::Ticking,
-            Message::Stop => self.tick_state = TickState::Stopped,
-            Message::Reset => (),
+            Message::Start => {
+                self.tick_state = TickState::Ticking;
+                self.last_update = Instant::now();
+            }
+            Message::Stop => {
+                self.tick_state = TickState::Stopped;
+                self.total_duration += Instant::now() - self.last_update;
+            }
+            Message::Reset => {
+                self.last_update = Instant::now();
+                self.total_duration = Duration::default();
+            }
+            Message::Update => match self.tick_state {
+                TickState::Ticking => {
+                    let now_update = Instant::now();
+                    self.total_duration += now_update - self.last_update;
+                    self.last_update = now_update;
+                }
+                _ => {}
+            },
         }
 
         Command::none()
     }
 
     fn view(&mut self) -> Element<Self::Message> {
-        let duration_text = "00:00:00.00";
+        let seconds = self.total_duration.as_secs();
+        let duration_text = format!(
+            "{:0>2}:{:0>2}:{:0>2}.{:0>2}",
+            seconds / HOUR,
+            (seconds % HOUR) / MINUTE,
+            seconds % MINUTE,
+            self.total_duration.subsec_millis() / 10,
+        );
 
         let tick_text = Text::new(duration_text).size(60);
 
@@ -96,6 +133,11 @@ impl Application for GUI {
             .height(Length::Fill)
             .align_items(Align::Center)
             .into()
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        let timer = timer::Timer::new(Duration::from_millis(MILLISEC / FPS));
+        Subscription::from_recipe(timer).map(|_| Message::Update)
     }
 }
 
